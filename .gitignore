@@ -1,0 +1,13 @@
+# Proprietary TallyPrime installation and runtime state (reference only)
+sorcecode/
+
+# TallyClone dependencies, generated database and Vite build
+node_modules/
+data/
+server/public/
+
+# Python and OS noise
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
