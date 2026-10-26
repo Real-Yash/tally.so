@@ -147,15 +147,97 @@ export function dayBook(companyId, from, to, typeName) {
       ORDER BY v.date, v.id`,
     ...params,
   );
+  const entryStmt = q;
   return vouchers.map((v) => {
-    const entries = q.all(
+    const entries = entryStmt.all(
       `SELECT e.*, l.name AS ledger_name
          FROM voucher_entries e JOIN ledgers l ON l.id = e.ledger_id
         WHERE e.voucher_id = ? ORDER BY e.id`,
       v.id,
     );
-    return { ...v, entries };
+    const items = entryStmt.all(
+      `SELECT vi.*, s.name AS item_name, s.hsn, u.name AS unit_name, u.symbol AS unit_symbol
+         FROM voucher_items vi
+         JOIN stock_items s ON s.id = vi.stock_item_id
+         LEFT JOIN units u ON u.id = s.unit_id
+        WHERE vi.voucher_id = ? ORDER BY vi.id`,
+      v.id,
+    );
+    return { ...v, entries, items };
   });
+}
+
+const STOCK_INWARD = new Set(["Purchase", "Credit Note", "Rejection In"]);
+const STOCK_OUTWARD = new Set(["Sales", "Debit Note", "Delivery Note"]);
+
+export function stockSummary(companyId, asOf) {
+  const companyRow = company(companyId);
+  const items = q.all(
+    `SELECT s.*, g.name AS stock_group_name, u.name AS unit_name, u.symbol AS unit_symbol
+       FROM stock_items s
+       LEFT JOIN stock_groups g ON g.id = s.stock_group_id
+       LEFT JOIN units u ON u.id = s.unit_id
+      WHERE s.company_id = ? ORDER BY s.name`,
+    companyId,
+  );
+  const movementRows = q.all(
+    `SELECT vi.stock_item_id, vi.quantity, vi.amount, vt.name AS voucher_type
+       FROM voucher_items vi
+       JOIN vouchers v ON v.id = vi.voucher_id
+       JOIN voucher_types vt ON vt.id = v.type_id
+      WHERE v.company_id = ? AND v.date >= ? AND v.date <= ?`,
+    companyId,
+    companyRow.books_from,
+    asOf,
+  );
+  const movement = new Map();
+  for (const row of movementRows) {
+    const bucket = movement.get(row.stock_item_id) ?? {
+      in_qty: 0,
+      in_value: 0,
+      out_qty: 0,
+      out_value: 0,
+    };
+    if (STOCK_INWARD.has(row.voucher_type)) {
+      bucket.in_qty += row.quantity;
+      bucket.in_value += row.amount;
+    } else if (STOCK_OUTWARD.has(row.voucher_type)) {
+      bucket.out_qty += row.quantity;
+      bucket.out_value += row.amount;
+    }
+    movement.set(row.stock_item_id, bucket);
+  }
+
+  const rows = items.map((item) => {
+    const m = movement.get(item.id) ?? { in_qty: 0, in_value: 0, out_qty: 0, out_value: 0 };
+    const openingQty = Number(item.opening_qty || 0);
+    const openingValue = r2(openingQty * Number(item.opening_rate || 0));
+    const availableQty = openingQty + m.in_qty;
+    const availableValue = openingValue + m.in_value;
+    const rate = availableQty > 0 ? availableValue / availableQty : Number(item.opening_rate || 0);
+    const closingQty = availableQty - m.out_qty;
+    const closingValue = r2(closingQty * rate);
+    return {
+      ...item,
+      opening_qty: r2(openingQty),
+      opening_value: openingValue,
+      in_qty: r2(m.in_qty),
+      in_value: r2(m.in_value),
+      out_qty: r2(m.out_qty),
+      out_value: r2(m.out_value),
+      closing_qty: r2(closingQty),
+      rate: r2(rate),
+      closing_value: closingValue,
+      low_stock: Number(item.reorder_level || 0) > 0 && closingQty < Number(item.reorder_level),
+    };
+  });
+
+  return {
+    asOf,
+    rows,
+    totalValue: r2(rows.reduce((s, row) => s + row.closing_value, 0)),
+    itemCount: rows.length,
+  };
 }
 
 export function ledgerStatement(companyId, ledgerId, from, to) {
