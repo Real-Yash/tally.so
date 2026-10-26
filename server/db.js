@@ -80,10 +80,53 @@ CREATE TABLE IF NOT EXISTS voucher_entries (
   type        TEXT NOT NULL CHECK (type IN ('Dr','Cr'))
 );
 
+CREATE TABLE IF NOT EXISTS units (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id  INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  symbol      TEXT,
+  UNIQUE (company_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS stock_groups (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id  INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  parent_name TEXT,
+  UNIQUE (company_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS stock_items (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id     INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  name           TEXT NOT NULL,
+  stock_group_id INTEGER REFERENCES stock_groups(id),
+  unit_id        INTEGER REFERENCES units(id),
+  opening_qty    REAL NOT NULL DEFAULT 0,
+  opening_rate   REAL NOT NULL DEFAULT 0,
+  gst_rate       REAL NOT NULL DEFAULT 0,
+  hsn            TEXT,
+  reorder_level  REAL NOT NULL DEFAULT 0,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (company_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS voucher_items (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  voucher_id    INTEGER NOT NULL REFERENCES vouchers(id) ON DELETE CASCADE,
+  stock_item_id INTEGER NOT NULL REFERENCES stock_items(id),
+  quantity      REAL NOT NULL CHECK (quantity > 0),
+  rate          REAL NOT NULL DEFAULT 0,
+  amount        REAL NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_ledgers_company ON ledgers(company_id);
 CREATE INDEX IF NOT EXISTS idx_vouchers_company_date ON vouchers(company_id, date);
 CREATE INDEX IF NOT EXISTS idx_entries_voucher ON voucher_entries(voucher_id);
 CREATE INDEX IF NOT EXISTS idx_entries_ledger ON voucher_entries(ledger_id);
+CREATE INDEX IF NOT EXISTS idx_stock_items_company ON stock_items(company_id);
+CREATE INDEX IF NOT EXISTS idx_voucher_items_voucher ON voucher_items(voucher_id);
+CREATE INDEX IF NOT EXISTS idx_voucher_items_item ON voucher_items(stock_item_id);
 `);
 
 export const q = {
@@ -119,15 +162,38 @@ export function getVoucherTypes(companyId) {
   );
 }
 
+export function getUnits(companyId) {
+  return q.all("SELECT * FROM units WHERE company_id = ? ORDER BY name", companyId);
+}
+
+export function getStockGroups(companyId) {
+  return q.all(
+    "SELECT * FROM stock_groups WHERE company_id = ? ORDER BY name",
+    companyId,
+  );
+}
+
+export function getStockItems(companyId) {
+  return q.all(
+    `SELECT s.*, g.name AS stock_group_name, u.name AS unit_name, u.symbol AS unit_symbol
+       FROM stock_items s
+       LEFT JOIN stock_groups g ON g.id = s.stock_group_id
+       LEFT JOIN units u ON u.id = s.unit_id
+      WHERE s.company_id = ? ORDER BY s.name`,
+    companyId,
+  );
+}
+
 export function companyStats(companyId) {
   const ledgers = q.get("SELECT COUNT(*) n FROM ledgers WHERE company_id = ?", companyId).n;
   const vouchers = q.get("SELECT COUNT(*) n FROM vouchers WHERE company_id = ?", companyId).n;
   const groups = q.get("SELECT COUNT(*) n FROM groups WHERE company_id = ?", companyId).n;
+  const items = q.get("SELECT COUNT(*) n FROM stock_items WHERE company_id = ?", companyId).n;
   const last = q.get(
     "SELECT MAX(date) d FROM vouchers WHERE company_id = ?",
     companyId,
   ).d;
-  return { ledgers, vouchers, groups, last_voucher_date: last };
+  return { ledgers, vouchers, groups, items, last_voucher_date: last };
 }
 
 export function bootstrap(companyId) {
@@ -138,6 +204,9 @@ export function bootstrap(companyId) {
     groups: getGroups(companyId),
     ledgers: getLedgers(companyId),
     voucherTypes: getVoucherTypes(companyId),
+    units: getUnits(companyId),
+    stockGroups: getStockGroups(companyId),
+    stockItems: getStockItems(companyId),
     stats: companyStats(companyId),
   };
 }
