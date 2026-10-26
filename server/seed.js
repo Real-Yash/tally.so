@@ -39,6 +39,22 @@ export const DEFAULT_VOUCHER_TYPES = [
   ["Debit Note", "Debit Note"],
 ];
 
+export const DEFAULT_UNITS = [
+  ["Nos", "nos"],
+  ["Pcs", "pcs"],
+  ["Kg", "kg"],
+  ["Box", "box"],
+  ["Ltr", "ltr"],
+];
+
+export const DEFAULT_STOCK_GROUPS = [
+  ["Traded Goods", null],
+  ["Electronics", "Traded Goods"],
+  ["Stationery", "Traded Goods"],
+  ["Raw Materials", null],
+  ["Finished Goods", null],
+];
+
 const NATURE_BY_GROUP = new Map(DEFAULT_GROUPS.map(([name, , nature]) => [name, nature]));
 
 export function groupNature(name) {
@@ -58,6 +74,16 @@ export function seedMasters(companyId) {
   );
   for (const [name, parent] of DEFAULT_VOUCHER_TYPES) {
     insertType.run(companyId, name, parent);
+  }
+  const insertUnit = db.prepare(
+    "INSERT OR IGNORE INTO units (company_id, name, symbol) VALUES (?, ?, ?)",
+  );
+  for (const [name, symbol] of DEFAULT_UNITS) insertUnit.run(companyId, name, symbol);
+  const insertStockGroup = db.prepare(
+    "INSERT OR IGNORE INTO stock_groups (company_id, name, parent_name) VALUES (?, ?, ?)",
+  );
+  for (const [name, parent] of DEFAULT_STOCK_GROUPS) {
+    insertStockGroup.run(companyId, name, parent);
   }
 }
 
@@ -126,6 +152,67 @@ export function ensureLedger(companyId, name, groupName, opts = {}) {
   };
 }
 
+export function ensureStockGroup(companyId, name, parentName = null) {
+  if (!name) name = "Traded Goods";
+  const existing = q.get(
+    "SELECT * FROM stock_groups WHERE company_id = ? AND name = ?",
+    companyId,
+    name,
+  );
+  if (existing) return existing;
+  const res = q.run(
+    "INSERT INTO stock_groups (company_id, name, parent_name) VALUES (?, ?, ?)",
+    companyId,
+    name,
+    parentName && parentName !== name ? parentName : null,
+  );
+  return q.get("SELECT * FROM stock_groups WHERE id = ?", res.lastInsertRowid);
+}
+
+export function ensureUnit(companyId, name, symbol = null) {
+  if (!name) name = "Nos";
+  const existing = q.get("SELECT * FROM units WHERE company_id = ? AND name = ?", companyId, name);
+  if (existing) return existing;
+  const res = q.run(
+    "INSERT INTO units (company_id, name, symbol) VALUES (?, ?, ?)",
+    companyId,
+    name,
+    symbol ?? name.toLowerCase(),
+  );
+  return q.get("SELECT * FROM units WHERE id = ?", res.lastInsertRowid);
+}
+
+export function ensureStockItem(companyId, name, opts = {}) {
+  if (!name?.trim()) throw new Error("Stock item name is required");
+  const existing = q.get(
+    "SELECT * FROM stock_items WHERE company_id = ? AND name = ?",
+    companyId,
+    name.trim(),
+  );
+  if (existing) return { item: existing, created: false };
+  const group = opts.groupName ? ensureStockGroup(companyId, opts.groupName) : null;
+  const unit = opts.unitName ? ensureUnit(companyId, opts.unitName) : null;
+  const res = q.run(
+    `INSERT INTO stock_items
+       (company_id, name, stock_group_id, unit_id, opening_qty, opening_rate,
+        gst_rate, hsn, reorder_level)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    companyId,
+    name.trim(),
+    group?.id ?? null,
+    unit?.id ?? null,
+    Number(opts.opening_qty ?? 0),
+    Number(opts.opening_rate ?? 0),
+    Number(opts.gst_rate ?? 0),
+    opts.hsn ?? null,
+    Number(opts.reorder_level ?? 0),
+  );
+  return {
+    item: q.get("SELECT * FROM stock_items WHERE id = ?", res.lastInsertRowid),
+    created: true,
+  };
+}
+
 export function createCompany({ name, mailing_name, books_from, gstin, pan, state, address, demo }) {
   if (!name || !name.trim()) throw new Error("Company name is required");
   const fy = books_from || currentFyStart();
@@ -144,6 +231,95 @@ export function createCompany({ name, mailing_name, books_from, gstin, pan, stat
   seedMasters(companyId);
   if (demo) seedDemo(companyId);
   return companyId;
+}
+
+export function ensureDemoInventory(companyId) {
+  const definitions = [
+    {
+      key: "cable",
+      name: "USB-C Cable",
+      group: "Electronics",
+      unit: "Nos",
+      qty: 120,
+      rate: 140,
+      gst: 18,
+      hsn: "8544",
+      reorder: 50,
+    },
+    {
+      key: "mouse",
+      name: "Wireless Mouse",
+      group: "Electronics",
+      unit: "Nos",
+      qty: 50,
+      rate: 620,
+      gst: 18,
+      hsn: "8471",
+      reorder: 20,
+    },
+    {
+      key: "notebook",
+      name: "A4 Notebook",
+      group: "Stationery",
+      unit: "Nos",
+      qty: 300,
+      rate: 40,
+      gst: 12,
+      hsn: "4820",
+      reorder: 100,
+    },
+  ];
+  const items = {};
+  for (const def of definitions) {
+    items[def.key] = ensureStockItem(companyId, def.name, {
+      groupName: def.group,
+      unitName: def.unit,
+      opening_qty: def.qty,
+      opening_rate: def.rate,
+      gst_rate: def.gst,
+      hsn: def.hsn,
+      reorder_level: def.reorder,
+    }).item;
+  }
+  return items;
+}
+
+export function attachDemoVoucherItems(companyId, items) {
+  const byName = new Map(Object.values(items).map((item) => [item.name, item]));
+  const attach = (number, rows) => {
+    const voucher = q.get(
+      "SELECT * FROM vouchers WHERE company_id = ? AND number = ?",
+      companyId,
+      number,
+    );
+    if (!voucher) return;
+    const existing = q.get(
+      "SELECT COUNT(*) n FROM voucher_items WHERE voucher_id = ?",
+      voucher.id,
+    ).n;
+    if (existing) return;
+    const ins = db.prepare(
+      "INSERT INTO voucher_items (voucher_id, stock_item_id, quantity, rate, amount) VALUES (?, ?, ?, ?, ?)",
+    );
+    for (const [name, qty, rate] of rows) {
+      const item = byName.get(name);
+      if (item) ins.run(voucher.id, item.id, qty, rate, Math.round(qty * rate * 100) / 100);
+    }
+  };
+  attach("SAL-0001", [
+    ["Wireless Mouse", 40, 900],
+    ["USB-C Cable", 60, 150],
+  ]);
+  attach("PUR-0001", [
+    ["USB-C Cable", 100, 150],
+    ["A4 Notebook", 70, 100],
+  ]);
+}
+
+export function ensureInventoryDemo(companyId) {
+  const items = ensureDemoInventory(companyId);
+  attachDemoVoucherItems(companyId, items);
+  return items;
 }
 
 export function seedDemo(companyId) {
@@ -175,10 +351,13 @@ export function seedDemo(companyId) {
     mobile: "+91 98200 00002",
     email: "sales@beta.example",
   }).ledger;
+  const items = ensureDemoInventory(companyId);
+
   const types = new Map(
     q.all("SELECT * FROM voucher_types WHERE company_id = ?", companyId).map((t) => [t.name, t]),
   );
-  const addVoucher = (type, number, date, narration, entries) => {
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const addVoucher = (type, number, date, narration, entries, itemLines = []) => {
     const v = q.run(
       "INSERT INTO vouchers (company_id, type_id, number, date, narration) VALUES (?, ?, ?, ?, ?)",
       companyId,
@@ -192,6 +371,12 @@ export function seedDemo(companyId) {
     );
     for (const [ledger, amount, drcr] of entries) {
       ins.run(v.lastInsertRowid, ledger.id, amount, drcr);
+    }
+    const insItem = db.prepare(
+      "INSERT INTO voucher_items (voucher_id, stock_item_id, quantity, rate, amount) VALUES (?, ?, ?, ?, ?)",
+    );
+    for (const [item, qty, rate] of itemLines) {
+      insItem.run(v.lastInsertRowid, item.id, qty, rate, round2(qty * rate));
     }
   };
 
@@ -208,6 +393,10 @@ export function seedDemo(companyId) {
       [alpha, 45000, "Dr"],
       [sales, 45000, "Cr"],
     ],
+    [
+      [items.mouse, 40, 900],
+      [items.cable, 60, 150],
+    ],
   );
   addVoucher(
     "Purchase",
@@ -217,6 +406,10 @@ export function seedDemo(companyId) {
     [
       [purchases, 22000, "Dr"],
       [beta, 22000, "Cr"],
+    ],
+    [
+      [items.cable, 100, 150],
+      [items.notebook, 70, 100],
     ],
   );
   addVoucher("Receipt", "RCT-0001", "2026-04-20", "Part receipt from Alpha Traders", [
@@ -236,12 +429,18 @@ export function currentFyStart(d = new Date()) {
 
 export function ensureDemoCompany() {
   const first = q.get("SELECT * FROM companies ORDER BY id LIMIT 1");
-  if (first) return first.id;
-  return createCompany({
+  if (first) {
+    seedMasters(first.id);
+    if (first.name === "Demo Traders") ensureInventoryDemo(first.id);
+    return first.id;
+  }
+  const id = createCompany({
     name: "Demo Traders",
     mailing_name: "Demo Traders",
     books_from: currentFyStart(),
     state: "Maharashtra",
     demo: true,
   });
+  ensureInventoryDemo(id);
+  return id;
 }
