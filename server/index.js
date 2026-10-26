@@ -7,6 +7,9 @@ import {
   db,
   getCompany,
   getLedgers,
+  getStockGroups,
+  getStockItems,
+  getUnits,
   q,
 } from "./db.js";
 import {
@@ -14,6 +17,9 @@ import {
   ensureDemoCompany,
   ensureGroup,
   ensureLedger,
+  ensureStockGroup,
+  ensureStockItem,
+  ensureUnit,
   seedMasters,
 } from "./seed.js";
 import {
@@ -21,6 +27,7 @@ import {
   dayBook,
   ledgerStatement,
   profitAndLoss,
+  stockSummary,
   trialBalance,
 } from "./reports.js";
 import { exportMastersXml, importFromTally, tallyQuery } from "./tally-client.js";
@@ -149,6 +156,130 @@ app.post("/api/companies/:id/groups", (req, res) => {
   res.status(201).json(ensureGroup(companyId, name.trim(), parent_name || null, nature));
 });
 
+function stockItemRow(id) {
+  return q.get(
+    `SELECT s.*, g.name AS stock_group_name, u.name AS unit_name, u.symbol AS unit_symbol
+       FROM stock_items s
+       LEFT JOIN stock_groups g ON g.id = s.stock_group_id
+       LEFT JOIN units u ON u.id = s.unit_id
+      WHERE s.id = ?`,
+    id,
+  );
+}
+
+app.get("/api/companies/:id/stock-items", (req, res) => {
+  requireCompany(req.params.id);
+  res.json(getStockItems(Number(req.params.id)));
+});
+
+app.post("/api/companies/:id/stock-items", (req, res) => {
+  const companyId = Number(req.params.id);
+  requireCompany(companyId);
+  const { name, stock_group_name, unit_name, opening_qty, opening_rate, gst_rate, hsn, reorder_level } =
+    req.body ?? {};
+  if (!name?.trim()) return res.status(400).json({ error: "Stock item name is required" });
+  const dup = q.get(
+    "SELECT id FROM stock_items WHERE company_id=? AND name=?",
+    companyId,
+    name.trim(),
+  );
+  if (dup) return res.status(409).json({ error: `Stock item '${name.trim()}' already exists` });
+  const { item } = ensureStockItem(companyId, name.trim(), {
+    groupName: stock_group_name || null,
+    unitName: unit_name || null,
+    opening_qty: Number(opening_qty) || 0,
+    opening_rate: Number(opening_rate) || 0,
+    gst_rate: Number(gst_rate) || 0,
+    hsn: hsn || null,
+    reorder_level: Number(reorder_level) || 0,
+  });
+  res.status(201).json(stockItemRow(item.id));
+});
+
+app.put("/api/companies/:id/stock-items/:itemId", (req, res) => {
+  const companyId = Number(req.params.id);
+  requireCompany(companyId);
+  const itemId = Number(req.params.itemId);
+  const existing = q.get(
+    "SELECT * FROM stock_items WHERE id=? AND company_id=?",
+    itemId,
+    companyId,
+  );
+  if (!existing) return res.status(404).json({ error: "Stock item not found" });
+  const b = req.body ?? {};
+  const name = (b.name ?? existing.name).trim();
+  if (!name) return res.status(400).json({ error: "Stock item name is required" });
+  const dup = q.get(
+    "SELECT id FROM stock_items WHERE company_id=? AND name=? AND id<>?",
+    companyId,
+    name,
+    itemId,
+  );
+  if (dup) return res.status(409).json({ error: `Stock item '${name}' already exists` });
+
+  const groupId =
+    b.stock_group_name !== undefined
+      ? b.stock_group_name
+        ? ensureStockGroup(companyId, b.stock_group_name).id
+        : null
+      : existing.stock_group_id;
+  const unitId =
+    b.unit_name !== undefined
+      ? b.unit_name
+        ? ensureUnit(companyId, b.unit_name).id
+        : null
+      : existing.unit_id;
+
+  q.run(
+    `UPDATE stock_items SET name=?, stock_group_id=?, unit_id=?, opening_qty=?, opening_rate=?,
+       gst_rate=?, hsn=?, reorder_level=? WHERE id=?`,
+    name,
+    groupId,
+    unitId,
+    Number(b.opening_qty ?? existing.opening_qty) || 0,
+    Number(b.opening_rate ?? existing.opening_rate) || 0,
+    Number(b.gst_rate ?? existing.gst_rate) || 0,
+    b.hsn ?? existing.hsn,
+    Number(b.reorder_level ?? existing.reorder_level) || 0,
+    itemId,
+  );
+  res.json(stockItemRow(itemId));
+});
+
+app.get("/api/companies/:id/units", (req, res) => {
+  requireCompany(req.params.id);
+  res.json(getUnits(Number(req.params.id)));
+});
+
+app.post("/api/companies/:id/units", (req, res) => {
+  const companyId = Number(req.params.id);
+  requireCompany(companyId);
+  const { name, symbol } = req.body ?? {};
+  if (!name?.trim()) return res.status(400).json({ error: "Unit name is required" });
+  const dup = q.get("SELECT id FROM units WHERE company_id=? AND name=?", companyId, name.trim());
+  if (dup) return res.status(409).json({ error: `Unit '${name.trim()}' already exists` });
+  res.status(201).json(ensureUnit(companyId, name.trim(), symbol || null));
+});
+
+app.get("/api/companies/:id/stock-groups", (req, res) => {
+  requireCompany(req.params.id);
+  res.json(getStockGroups(Number(req.params.id)));
+});
+
+app.post("/api/companies/:id/stock-groups", (req, res) => {
+  const companyId = Number(req.params.id);
+  requireCompany(companyId);
+  const { name, parent_name } = req.body ?? {};
+  if (!name?.trim()) return res.status(400).json({ error: "Stock group name is required" });
+  const dup = q.get(
+    "SELECT id FROM stock_groups WHERE company_id=? AND name=?",
+    companyId,
+    name.trim(),
+  );
+  if (dup) return res.status(409).json({ error: `Stock group '${name.trim()}' already exists` });
+  res.status(201).json(ensureStockGroup(companyId, name.trim(), parent_name || null));
+});
+
 const VOUCHER_PREFIX = {
   Payment: "PMT",
   Receipt: "RCT",
@@ -181,7 +312,7 @@ function nextVoucherNumber(companyId, typeName) {
 app.post("/api/companies/:id/vouchers", (req, res) => {
   const companyId = Number(req.params.id);
   requireCompany(companyId);
-  const { type, date, number, narration, entries } = req.body ?? {};
+  const { type, date, number, narration, entries, items } = req.body ?? {};
   if (!type) return res.status(400).json({ error: "Voucher type is required" });
   if (!Array.isArray(entries) || entries.length < 2)
     return res.status(400).json({ error: "A voucher needs at least two entries" });
@@ -204,6 +335,25 @@ app.post("/api/companies/:id/vouchers", (req, res) => {
   if (Math.abs(dr - cr) > 0.004)
     return res.status(400).json({ error: `Voucher is not balanced (Dr ${dr} / Cr ${cr})` });
 
+  const cleanedItems = (Array.isArray(items) ? items : [])
+    .filter((line) => line.stock_item_id)
+    .map((line) => {
+      const quantity = Math.round(Number(line.quantity) * 1000) / 1000;
+      const rate = Math.round(Number(line.rate) * 100) / 100;
+      return {
+        stock_item_id: Number(line.stock_item_id),
+        quantity,
+        rate,
+        amount: Math.round(quantity * rate * 100) / 100,
+      };
+    });
+  for (const line of cleanedItems) {
+    if (!q.get("SELECT id FROM stock_items WHERE id=? AND company_id=?", line.stock_item_id, companyId))
+      return res.status(400).json({ error: "An item line references an unknown stock item" });
+    if (!(line.quantity > 0)) return res.status(400).json({ error: "Item quantity must be positive" });
+    if (line.rate < 0) return res.status(400).json({ error: "Item rate cannot be negative" });
+  }
+
   const vdate = date || today();
   const vnumber = (number && String(number).trim()) || nextVoucherNumber(companyId, type);
   let voucherId;
@@ -222,6 +372,14 @@ app.post("/api/companies/:id/vouchers", (req, res) => {
       "INSERT INTO voucher_entries (voucher_id, ledger_id, amount, type) VALUES (?, ?, ?, ?)",
     );
     for (const e of cleaned) ins.run(voucherId, e.ledger_id, e.amount, e.type);
+    if (cleanedItems.length) {
+      const insItem = db.prepare(
+        "INSERT INTO voucher_items (voucher_id, stock_item_id, quantity, rate, amount) VALUES (?, ?, ?, ?, ?)",
+      );
+      for (const line of cleanedItems) {
+        insItem.run(voucherId, line.stock_item_id, line.quantity, line.rate, line.amount);
+      }
+    }
     db.exec("COMMIT");
   } catch (err) {
     try {
@@ -237,6 +395,7 @@ app.post("/api/companies/:id/vouchers", (req, res) => {
     date: vdate,
     type,
     entries: cleaned,
+    items: cleanedItems,
   });
 });
 
@@ -259,6 +418,7 @@ app.delete("/api/companies/:id/vouchers/:voucherId", (req, res) => {
 
   db.exec("BEGIN");
   try {
+    q.run("DELETE FROM voucher_items WHERE voucher_id=?", voucherId);
     q.run("DELETE FROM voucher_entries WHERE voucher_id=?", voucherId);
     q.run("DELETE FROM vouchers WHERE id=?", voucherId);
     db.exec("COMMIT");
@@ -301,6 +461,12 @@ app.get("/api/companies/:id/ledgers/:ledgerId/statement", (req, res) => {
   const company = requireCompany(req.params.id);
   const { from, to } = fyRange(company, req.query.from, req.query.to);
   res.json(ledgerStatement(company.id, Number(req.params.ledgerId), from, to));
+});
+
+app.get("/api/companies/:id/reports/stock-summary", (req, res) => {
+  const company = requireCompany(req.params.id);
+  const asOf = req.query.as_of || today();
+  res.json(stockSummary(company.id, asOf));
 });
 
 app.post("/api/companies/:id/import/tally", h(async (req, res) => {
