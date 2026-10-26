@@ -8,7 +8,9 @@ import { DayBook, VoucherForm, VoucherMenu } from "./screens/Vouchers.jsx";
 import { BalanceSheet, PnL, TrialBalance } from "./screens/Reports.jsx";
 import ImportTally from "./screens/ImportTally.jsx";
 import Groups from "./screens/Groups.jsx";
-import { About, StockSummary } from "./screens/Misc.jsx";
+import Inventory from "./screens/Inventory.jsx";
+import StockSummary from "./screens/StockSummary.jsx";
+import { About } from "./screens/Misc.jsx";
 
 function fyLabel(booksFrom) {
   if (!booksFrom) return "";
@@ -169,6 +171,9 @@ export default function App() {
         break;
       case "stock":
         screen = <StockSummary ctx={ctx} />;
+        break;
+      case "inventory":
+        screen = <Inventory ctx={ctx} />;
         break;
       case "about":
         screen = <About ctx={ctx} />;

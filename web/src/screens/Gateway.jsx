@@ -9,6 +9,7 @@ const SECTIONS = [
       { label: "Alter Ledger", hint: "Edit an existing account", view: "ledgers" },
       { label: "Chart of Accounts", hint: "All ledgers and groups", view: "ledgers" },
       { label: "Groups", hint: "Create or review account groups", view: "groups" },
+      { label: "Inventory Masters", hint: "Stock items, units and groups", view: "inventory" },
     ],
   },
   {
@@ -24,7 +25,7 @@ const SECTIONS = [
       { label: "Balance Sheet", view: "balance-sheet" },
       { label: "Profit & Loss A/c", view: "pnl" },
       { label: "Trial Balance", view: "trial" },
-      { label: "Stock Summary", hint: "Phase 2 — inventory reports", view: "stock" },
+      { label: "Stock Summary", hint: "Item-wise closing stock", view: "stock" },
     ],
   },
   {
@@ -76,6 +77,10 @@ export default function Gateway({ ctx }) {
           <div className="stat-card">
             <span>Groups</span>
             <strong>{data.stats.groups}</strong>
+          </div>
+          <div className="stat-card">
+            <span>Stock items</span>
+            <strong>{data.stats.items}</strong>
           </div>
           <div className="stat-card">
             <span>Last entry</span>

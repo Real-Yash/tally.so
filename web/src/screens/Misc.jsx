@@ -37,16 +37,3 @@ export function About({ ctx }) {
     </Screen>
   );
 }
-
-export function StockSummary() {
-  return (
-    <Screen title="Stock Summary" subtitle="Inventory reports are planned for phase 2.">
-      <div className="panel">
-        <p className="muted">
-          Phase 1 covers the accounting core. Stock groups, units, items and the Stock Summary
-          report will be added with the inventory module.
-        </p>
-      </div>
-    </Screen>
-  );
-}
