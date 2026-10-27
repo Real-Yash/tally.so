@@ -1,6 +1,11 @@
 # Proprietary TallyPrime installation and runtime state (reference only)
 sorcecode/
 
+# Local assessment material, not part of the app repository
+TALLYPRIME_7.2_REA_REPORT.md
+evidence/
+site/
+
 # TallyClone dependencies, generated database and Vite build
 node_modules/
 data/

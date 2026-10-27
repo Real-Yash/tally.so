@@ -1,9 +1,8 @@
 # TallyClone
 
-A TallyPrime-style accounting application built from the findings in
-`../TALLYPRIME_7.2_REA_REPORT.md`. It is a **clean-room** implementation: no Tally code is used,
-but the vocabulary, group hierarchy, field names and gateway interaction model follow the
-observed 7.2 behaviour.
+A TallyPrime-style accounting application built from an independent clean-room assessment of
+TallyPrime 7.2. It uses **no Tally code**, but the vocabulary, group hierarchy, field names and
+gateway interaction model follow the observed 7.2 behaviour.
 
 ## Run
 

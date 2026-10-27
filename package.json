@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A TallyPrime-style accounting application built from the 7.2 reverse-engineering report.",
+  "description": "A TallyPrime-style accounting application built from a clean-room assessment of TallyPrime 7.2.",
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,green \"node --watch server/index.js\" \"vite --config vite.config.js\"",
     "build": "vite build --config vite.config.js",
