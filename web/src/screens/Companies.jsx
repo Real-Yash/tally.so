@@ -64,7 +64,7 @@ function CompanyForm({ ctx, onCreated, compact = false }) {
       </div>
       <label className="check">
         <input type="checkbox" checked={form.demo} onChange={set("demo")} />
-        Seed sample ledgers and vouchers
+        Seed sample ledgers, vouchers and stock items
       </label>
       <ErrorBox error={error} />
       <div className="form-actions">

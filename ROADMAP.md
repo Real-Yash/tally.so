@@ -17,11 +17,19 @@ working plan.
 Exit criterion: a small trading business can keep its books for a year and produce a tallied
 Balance Sheet and P&L.
 
-## Phase 2 — Inventory and GST (planned)
+## Phase 2 — Inventory and GST (2a done)
 
-- Stock groups, stock items, units, opening stock and item lines on vouchers.
-- Godowns, batches, manufacturing/expiry dates and stock journals.
-- Stock Summary with group-wise opening, inward, outward, closing and valuation.
+Done in 2a:
+
+- Stock groups, stock items, simple units, opening stock, GST rate and HSN/SAC on items.
+- Inventory Masters screen, item lines on Sales/Purchase/Credit/Debit Note, Day Book item display.
+- Stock Summary with group-wise opening, inward, outward, closing and weighted-average value.
+
+Still to do:
+
+- Compound units, godowns, batches, manufacturing/expiry dates.
+- Stock journals/transfers, physical stock, valuation methods beyond weighted average.
+- Sales and purchase item lines with discount, freight and rounding.
 - GST: CGST/SGST/IGST split, place of supply, reverse charge, composition, GSTR-1/GSTR-3B,
   e-invoice/e-way bill payloads.
 - Invoice and delivery-note printing with a template editor.

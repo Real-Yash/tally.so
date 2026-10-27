@@ -18,8 +18,8 @@ npm start            # http://localhost:8787
 `HOST=100.100.10.10 PORT=8787 npm start` limits the listener to one interface (useful when the
 only intended clients are on a tailnet).
 
-The first launch creates `Demo Traders` with sample ledgers and vouchers so the reports are not
-empty. Data lives in `data/tally.db` (SQLite, WAL mode).
+The first launch creates `Demo Traders` with sample ledgers, vouchers and stock items so the
+reports are not empty. Data lives in `data/tally.db` (SQLite, WAL mode).
 
 ## Phase 1 — Accounting core (implemented)
 
@@ -36,9 +36,25 @@ empty. Data lives in `data/tally.db` (SQLite, WAL mode).
 - Export masters as a Tally-compatible `<ENVELOPE><IMPORTDATA>` XML file.
 - Keyboard-driven Gateway menu (`↑`/`↓`, `Enter`, `Esc`, `F3`).
 
+## Phase 2a — Inventory core (implemented)
+
+- Units, stock groups and stock items with opening quantity/rate, GST rate, HSN/SAC and reorder
+  level.
+- Inventory Masters screen for creating and altering stock items, units and stock groups.
+- Optional item lines on Sales, Purchase, Credit Note and Debit Note vouchers, with quantity,
+  rate, amount and a “use total” helper for the accounting entries.
+- Item lines appear in the Day Book, and drive closing quantities in the Stock Summary.
+- Stock Summary groups items by stock group and shows opening, inward, outward, closing, weighted
+  average rate and closing value.
+- Demo data ships with three stock items and item lines on the sample sales/purchase vouchers.
+
+Stock value is currently memorandum: the accounting entries remain the source of truth for the
+ledger reports, and no automatic opening/closing stock adjustment is posted yet. That keeps the
+Trial Balance and Balance Sheet tallied while inventory is introduced.
+
 ## Not yet implemented
 
-Inventory masters and stock reports, godowns and batches, stock valuation, stock journals and
+Godowns and batches, stock valuation methods beyond weighted average, stock journals and
 transfers, GST computation and e-invoicing, payroll, multi-currency, cost centres, TDL scripting,
 user roles and audit trail, print templates, multi-company consolidation, sync/remote access.
 
@@ -53,12 +69,12 @@ See [ROADMAP.md](ROADMAP.md) for the phased path from this core to a TallyPrime-
 server/
   db.js            SQLite schema, queries, bootstrap
   seed.js          default groups, voucher types, demo data
-  reports.js       trial balance, balance sheet, P&L, day book, ledger statements
+  reports.js       trial balance, balance sheet, P&L, day book, stock summary, statements
   tally-client.js  TallyPrime import (port 9000) and XML export
   index.js         Express API + static build
 web/
   src/App.jsx      shell, routing stack, keyboard shortcuts
-  src/screens/     Gateway, companies, ledgers, vouchers, reports, import
+  src/screens/     Gateway, companies, ledgers, vouchers, inventory, reports, import
 data/tally.db      created on first run
 ```
 
