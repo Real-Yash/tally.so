@@ -42,16 +42,21 @@ export function VoucherMenu({ ctx }) {
 }
 
 const blankLine = (type) => ({ ledger_id: "", amount: "", type });
+const blankItemLine = () => ({ stock_item_id: "", quantity: "1", rate: "" });
+const TRACK_STOCK = ["Sales", "Purchase", "Credit Note", "Debit Note"];
 
 export function VoucherForm({ ctx, type }) {
   const { company, data, refresh, notify, back, go } = ctx;
   const voucherType = data.voucherTypes.find((t) => t.name === type);
+  const tracksItems = TRACK_STOCK.includes(type);
+  const stockItems = data.stockItems ?? [];
   const [form, setForm] = useState({
     date: today(),
     number: "",
     narration: "",
   });
   const [lines, setLines] = useState([blankLine("Dr"), blankLine("Cr")]);
+  const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -64,7 +69,19 @@ export function VoucherForm({ ctx, type }) {
     return { dr, cr, diff: Math.round((dr - cr) * 100) / 100 };
   }, [lines]);
 
+  const itemTotal = useMemo(
+    () =>
+      Math.round(
+        items.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.rate) || 0), 0) * 100,
+      ) / 100,
+    [items],
+  );
+
   const complete = lines.every((l) => l.ledger_id && Number(l.amount) > 0);
+  const itemsComplete =
+    !tracksItems ||
+    items.every((l) => l.stock_item_id && Number(l.quantity) > 0 && Number(l.rate) >= 0);
+
   function updateLine(i, patch) {
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   }
@@ -75,6 +92,41 @@ export function VoucherForm({ ctx, type }) {
 
   function removeLine(i) {
     setLines((ls) => (ls.length > 2 ? ls.filter((_, j) => j !== i) : ls));
+  }
+
+  function addItemLine() {
+    setItems((ls) => [...ls, blankItemLine()]);
+  }
+
+  function updateItemLine(i, patch) {
+    setItems((ls) =>
+      ls.map((l, j) => {
+        if (j !== i) return l;
+        const next = { ...l, ...patch };
+        if (patch.stock_item_id) {
+          const item = stockItems.find((s) => String(s.id) === String(patch.stock_item_id));
+          if (item && !(Number(l.rate) > 0)) next.rate = String(item.opening_rate ?? 0);
+        }
+        return next;
+      }),
+    );
+  }
+
+  function removeItemLine(i) {
+    setItems((ls) => ls.filter((_, j) => j !== i));
+  }
+
+  function useItemTotal() {
+    if (!(itemTotal > 0)) return;
+    const amount = String(itemTotal);
+    setLines((ls) => {
+      const drIdx = ls.findIndex((l) => l.type === "Dr");
+      const crIdx = ls.findIndex((l) => l.type === "Cr");
+      if (drIdx < 0 || crIdx < 0) return ls;
+      return ls.map((l, i) =>
+        i === drIdx || i === crIdx ? { ...l, amount } : l,
+      );
+    });
   }
 
   function balance() {
@@ -106,6 +158,15 @@ export function VoucherForm({ ctx, type }) {
           amount: Number(l.amount),
           type: l.type,
         })),
+        items: tracksItems
+          ? items
+              .filter((l) => l.stock_item_id)
+              .map((l) => ({
+                stock_item_id: Number(l.stock_item_id),
+                quantity: Number(l.quantity),
+                rate: Number(l.rate),
+              }))
+          : [],
       });
       await refresh();
       notify(`${type} voucher saved`);
@@ -215,12 +276,119 @@ export function VoucherForm({ ctx, type }) {
           </tfoot>
         </table>
 
+        {tracksItems ? (
+          stockItems.length === 0 ? (
+            <p className="muted tiny">
+              No stock items yet — create them in <button type="button" className="link" onClick={() => go("inventory")}>Inventory Masters</button> to attach item lines.
+            </p>
+          ) : (
+            <div className="inventory-entry">
+              <div className="section-bar">
+                <h2>Inventory allocation</h2>
+                <span className="muted tiny">Optional · drives Stock Summary</span>
+              </div>
+              <table className="data-table entry-table item-table">
+                <thead>
+                  <tr>
+                    <th>Stock item</th>
+                    <th className="amt">Quantity</th>
+                    <th className="amt">Rate</th>
+                    <th className="amt">Amount</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="muted">
+                        No item lines. Add one to record the goods movement.
+                      </td>
+                    </tr>
+                  ) : null}
+                  {items.map((line, i) => {
+                    const item = stockItems.find((s) => String(s.id) === String(line.stock_item_id));
+                    return (
+                      <tr key={i}>
+                        <td>
+                          <select
+                            value={line.stock_item_id}
+                            onChange={(e) => updateItemLine(i, { stock_item_id: e.target.value })}
+                          >
+                            <option value="">Select stock item…</option>
+                            {stockItems.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.name}{s.unit_name ? ` — ${s.unit_name}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="amt">
+                          <input
+                            type="number"
+                            step="0.001"
+                            min="0"
+                            value={line.quantity}
+                            onChange={(e) => updateItemLine(i, { quantity: e.target.value })}
+                          />
+                          <span className="unit-tag">{item?.unit_symbol || item?.unit_name || ""}</span>
+                        </td>
+                        <td className="amt">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={line.rate}
+                            onChange={(e) => updateItemLine(i, { rate: e.target.value })}
+                          />
+                        </td>
+                        <td className="amt">
+                          <Money value={(Number(line.quantity) || 0) * (Number(line.rate) || 0)} />
+                        </td>
+                        <td className="row-actions">
+                          <button type="button" className="link danger" onClick={() => removeItemLine(i)}>
+                            remove
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td>
+                      <button type="button" className="link" onClick={addItemLine}>+ Add item line</button>
+                    </td>
+                    <td className="amt" colSpan={2}>Item total</td>
+                    <td className="amt"><Money value={itemTotal} /></td>
+                    <td />
+                  </tr>
+                  <tr>
+                    <td colSpan={4} className="muted tiny">
+                      Item lines are memorandum inventory; the accounting entries above still post the ledger values.
+                    </td>
+                    <td className="row-actions">
+                      <button
+                        type="button"
+                        className="link"
+                        onClick={useItemTotal}
+                        disabled={!(itemTotal > 0)}
+                      >
+                        use total
+                      </button>
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )
+        ) : null}
+
         <ErrorBox error={error} />
         <div className="form-actions">
           <Button
             variant="primary"
             type="submit"
-            disabled={busy || !complete || totals.diff !== 0}
+            disabled={busy || !complete || totals.diff !== 0 || !itemsComplete}
           >
             {busy ? "Saving…" : "Accept voucher"}
           </Button>
@@ -328,6 +496,33 @@ export function DayBook({ ctx }) {
                   ))}
                 </tbody>
               </table>
+              {v.items?.length ? (
+                <div className="voucher-items">
+                  <div className="voucher-items-head">Inventory</div>
+                  <table className="data-table compact-table">
+                    <thead>
+                      <tr>
+                        <th>Stock item</th>
+                        <th className="num">Quantity</th>
+                        <th className="num">Rate</th>
+                        <th className="num">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {v.items.map((it) => (
+                        <tr key={it.id}>
+                          <td>{it.item_name}</td>
+                          <td className="num">
+                            {it.quantity} <small className="muted">{it.unit_symbol || it.unit_name || ""}</small>
+                          </td>
+                          <td className="num"><Money value={it.rate} /></td>
+                          <td className="num"><Money value={it.amount} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
             </article>
           ))}
         </div>
